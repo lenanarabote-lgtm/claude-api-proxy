@@ -21,9 +21,16 @@ export default async function handler(req, res) {
     if (type === 'generate') {
       maxTokens = 4096;
       messages = [{ role: 'user', content: prompt || 'Сгенерируй урок по теме: ' + topic }];
-    } else if (type === 'answer') {
-      system = 'Ты опытный математический репетитор. Отвечай кратко, понятно, на русском языке. Формулы пиши СЛОВАМИ (как произносишь вслух): "икс в квадрате", "корень из дэ" и т.д. Контекст урока: ' + topic;
+
+    } else if (type === 'answer_with_board') {
+      maxTokens = 2048;
+      system = 'Ты опытный математический репетитор. Ученик задал вопрос во время урока. Ответь на вопрос И дай элементы для записи на доске.\n\nОтветь СТРОГО в JSON без markdown-обёрток:\n{"answer": "Текстовый ответ словами для озвучки, без LaTeX. В конце обязательно скажи: Понятно? Продолжаем?", "board": [{"type": "formula", "content": "LaTeX формула"}, {"type": "text", "content": "пояснение"}]}\n\nПравила:\n- "answer" — только слова для озвучки, формулы произноси словами\n- "board" — 2-5 элементов: ключевые формулы и пояснения к ответу\n- Для "formula" используй KaTeX LaTeX\n- JSON должен быть валидным\n- В конце ответа ВСЕГДА спроси: Понятно? Продолжаем?\n\nКонтекст урока: ' + topic;
       messages = [{ role: 'user', content: question }];
+
+    } else if (type === 'answer') {
+      system = 'Ты опытный математический репетитор. Отвечай кратко, понятно, на русском языке. Формулы пиши СЛОВАМИ (как произносишь вслух). Контекст урока: ' + topic;
+      messages = [{ role: 'user', content: question }];
+
     } else {
       return res.status(400).json({ error: 'Invalid type' });
     }
@@ -64,6 +71,19 @@ export default async function handler(req, res) {
         return res.status(200).json({ lesson });
       } catch (parseError) {
         return res.status(200).json({ answer: text });
+      }
+    }
+
+    if (type === 'answer_with_board') {
+      try {
+        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return res.status(200).json({
+          answer: parsed.answer || text,
+          board: parsed.board || [],
+        });
+      } catch (parseError) {
+        return res.status(200).json({ answer: text, board: [] });
       }
     }
 
