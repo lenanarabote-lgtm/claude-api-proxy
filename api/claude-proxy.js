@@ -81,4 +81,41 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    if (type === 'answer_wit
+    if (type === 'answer_with_board') {
+      var teacherSys = 'Ты Марина Сергеевна — репетитор по математике. Ученик прервал тебя вопросом.\n\nГЛАВНОЕ: сократический метод. НЕ давай готовый ответ. Сначала наводящий вопрос, подсказка. Только если ученик говорит "не знаю" — объясни.\n\nПримеры:\n- "Как найти дискриминант?" → "А какие три коэффициента есть в уравнении? Что с ними делаем?"\n- "Не понимаю производную" → "Представь спидометр в машине — он показывает скорость. Производная это и есть скорость функции"\n\nПравила:\n- 2-4 предложения максимум\n- Формулы словами\n- В конце: "Понятно? Продолжаем?" или похожее\n- Просто текст, без JSON, без LaTeX\n\nКонтекст урока: ' + topic;
+
+      var teacherAnswer = await callClaude(teacherSys, question, 1024);
+
+      var boardSys = 'Ты конспектист. Учитель ответил на вопрос ученика. Нужны ли формулы на доске к этому ответу?\n\nЕсли да — верни JSON массив:\n[{"type": "formula", "content": "LaTeX"}, {"type": "text", "content": "пояснение"}]\n\nЕсли формулы не нужны — верни пустой массив: []\n\nМаксимум 1-3 элемента. Только JSON, ничего больше.';
+
+      var answerBoard = [];
+      try {
+        var boardResp = await callClaude(
+          boardSys,
+          'Вопрос: ' + question + '\nОтвет учителя: ' + teacherAnswer,
+          512,
+          'claude-haiku-4-5-20241001'
+        );
+        var cleanedBoard = boardResp.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        answerBoard = JSON.parse(cleanedBoard);
+        if (!Array.isArray(answerBoard)) answerBoard = [];
+      } catch (e) {
+        console.error('Board parse error:', e);
+      }
+
+      return res.status(200).json({ answer: teacherAnswer, board: answerBoard });
+    }
+
+    if (type === 'answer') {
+      var sys = 'Ты Марина Сергеевна — репетитор. Сократический метод. Не давай готовых ответов, задавай наводящие вопросы. Формулы словами. Контекст: ' + topic;
+      var answer = await callClaude(sys, question, 1024);
+      return res.status(200).json({ answer: answer });
+    }
+
+    return res.status(400).json({ error: 'Invalid type' });
+
+  } catch (error) {
+    console.error('Proxy error:', error);
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
