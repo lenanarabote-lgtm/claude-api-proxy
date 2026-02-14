@@ -58,7 +58,7 @@ module.exports = async function handler(req, res) {
 
       var results = await Promise.all([
         callClaude(teacherSystem, topicText, 2048),
-        callClaude(boardSystem, topicText, 2048, 'claude-haiku-4-5-20241001'),
+        callClaude(boardSystem, topicText, 2048, 'claude-haiku-4-5-20251001'),
       ]);
 
       var teacherText = results[0];
@@ -94,7 +94,7 @@ module.exports = async function handler(req, res) {
           boardSys,
           'Вопрос: ' + question + '\nОтвет учителя: ' + teacherAnswer,
           512,
-          'claude-haiku-4-5-20241001'
+          'claude-haiku-4-5-20251001'
         );
         var cleanedBoard = boardResp.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         answerBoard = JSON.parse(cleanedBoard);
