@@ -45,9 +45,9 @@ module.exports = async function handler(req, res) {
     var prompt = req.body.prompt;
 
     if (type === 'generate') {
-      var sys = 'Ты Марина Сергеевна, репетитор математики, 35 лет, кандидат наук. Ты ведёшь живой урок с учеником-подростком.\n\nСгенерируй урок как МАССИВ СЕГМЕНТОВ. Каждый сегмент — это либо объяснение, либо вопрос ученику.\n\nОтветь СТРОГО в JSON без markdown-обёрток:\n[\n  {\n    "type": "explain",\n    "speech": "Текст для озвучки. Короткий, 2-3 предложения. Как живой человек.",\n    "board": [{"type": "text", "content": "📌 Заголовок"}, {"type": "formula", "content": "LaTeX"}]\n  },\n  {\n    "type": "question",\n    "speech": "Вопрос ученику, на который он должен ответить сам. 1 предложение.",\n    "board": [{"type": "formula", "content": "LaTeX с вопросом"}],\n    "hint": "Подсказка если ученик не знает",\n    "answer": "Правильный ответ кратко"\n  },\n  {\n    "type": "explain",\n    "speech": "Продолжение объяснения после вопроса...",\n    "board": [{"type": "formula", "content": "LaTeX"}]\n  }\n]\n\nПРАВИЛА:\n- 5-8 сегментов всего\n- Чередуй explain и question: объяснил → спросил → объяснил → спросил\n- explain.speech: 2-4 предложения, разговорный стиль, аналогии из жизни\n- question.speech: один конкретный вопрос, на который можно ответить\n- question.hint: подсказка-направление, не ответ\n- question.answer: краткий правильный ответ для проверки\n- board: 1-3 элемента на сегмент, KaTeX LaTeX\n- Формулы в speech СЛОВАМИ\n- НЕ начинай с приветствия, сразу к делу\n- НЕ говори "важно отметить", "следует подчеркнуть"\n- Обязательно числовой пример с пошаговым решением\n- JSON должен быть валидным';
+      var teacherSystem = 'Ты Марина Сергеевна, репетитор математики, 35 лет, кандидат наук. Ты ведёшь живой урок с учеником-подростком.\n\nСгенерируй урок как МАССИВ СЕГМЕНТОВ. Каждый сегмент — это либо объяснение, либо вопрос ученику.\n\nОтветь СТРОГО в JSON без markdown-обёрток:\n[\n  {\n    "type": "explain",\n    "speech": "Текст для озвучки. Короткий, 2-3 предложения.",\n    "board": [{"type": "text", "content": "📌 Заголовок"}, {"type": "formula", "content": "LaTeX"}]\n  },\n  {\n    "type": "question",\n    "speech": "Вопрос ученику. 1 предложение. Конкретный, с числами если возможно.",\n    "board": [{"type": "formula", "content": "LaTeX если нужна формула к вопросу"}],\n    "hint": "Подсказка-направление, НЕ ответ. Например: вспомни формулу дискриминанта",\n    "answer": "Правильный ответ кратко, например: 25"\n  }\n]\n\nПРАВИЛА:\n- 5-8 сегментов\n- Чередуй explain и question\n- ВОПРОСЫ ДОЛЖНЫ БЫТЬ КОНКРЕТНЫМИ: "Чему равен дискриминант если a=2, b=-7, c=3?" а НЕ "Как ты думаешь что дальше?"\n- explain.speech: 2-4 предложения, разговорный стиль\n- question.speech: ОДИН конкретный вопрос\n- question.hint: подсказка-НАПРАВЛЕНИЕ, не ответ\n- question.answer: краткий ответ для проверки\n- Формулы в speech СЛОВАМИ\n- НЕ начинай с приветствия\n- Обязательно числовой пример\n- JSON валидный';
 
-      var text = await callClaude(sys, prompt || 'Тема: ' + topic, 4096);
+      var text = await callClaude(teacherSystem, prompt || 'Тема: ' + topic, 4096);
 
       var segments = [];
       try {
@@ -62,30 +62,36 @@ module.exports = async function handler(req, res) {
     }
 
     if (type === 'evaluate') {
-      var sys2 = 'Ты Марина Сергеевна, репетитор. Ученик ответил на твой вопрос во время урока.\n\nОцени ответ и отреагируй ПО-ЧЕЛОВЕЧЕСКИ. Ответь в JSON:\n{"correct": true/false, "reaction": "Твоя реакция для озвучки, 1-2 предложения", "board": []}\n\nПравила:\n- Если правильно: похвали коротко и естественно ("Точно!", "Да, именно так!", "Ну вот, сам же знаешь!")\n- Если неправильно: не ругай, объясни через подсказку, дай правильный ответ\n- reaction: формулы словами, разговорный стиль\n- board: 0-2 элемента если нужна формула, иначе пустой массив\n- JSON валидный, без markdown';
+      var studentAnswer = question;
+      var questionSpeech = req.body.questionSpeech || '';
+      var correctAnswer = req.body.correctAnswer || '';
+      var hintText = req.body.hint || '';
+      var attemptNumber = req.body.attemptNumber || 1;
 
-      var evalInput = 'Вопрос учителя: ' + req.body.questionSpeech + '\nПравильный ответ: ' + req.body.correctAnswer + '\nОтвет ученика: ' + question + '\nТема: ' + topic;
+      var sys = 'Ты Марина Сергеевна, репетитор математики. Ученик ответил на твой вопрос.\n\nОтветь в JSON:\n{"status": "correct" или "hint" или "explain", "reaction": "текст для озвучки"}\n\nПРАВИЛА ОЦЕНКИ:\n\n1. Если ответ ПРАВИЛЬНЫЙ (или близок к правильному):\n{"status": "correct", "reaction": "Короткая похвала! Точно! / Да, верно! / Ну вот видишь, сам знаешь!"}\n\n2. Если ученик говорит "не знаю", "не понимаю", "затрудняюсь", "хз", "без понятия" или попытка ' + attemptNumber + ' из 3 и ответ неверный:\n- При 1-й попытке: дай НАВОДЯЩИЙ ВОПРОС, не ответ\n{"status": "hint", "reaction": "Наводящий вопрос. Например: Вспомни, дискриминант это бэ в квадрате минус что?"}\n- При 2-й попытке: дай более конкретную подсказку\n{"status": "hint", "reaction": "Более прямая подсказка. Подставь числа: бэ это минус 7, значит бэ в квадрате это..."}\n- При 3-й попытке: объясни ответ\n{"status": "explain", "reaction": "Ладно, смотри. [Краткое объяснение с ответом]. Запомни это!"}\n\n3. Если ответ НЕВЕРНЫЙ:\n{"status": "hint", "reaction": "Не совсем. [Наводящий вопрос без ответа]"}\n\nВАЖНО:\n- reaction: 1-2 предложения максимум\n- Формулы словами\n- НЕ говори "отличная попытка", "хороший вопрос"\n- Сразу к делу\n- JSON валидный\n\nКонтекст: ' + topic;
 
-      var evalText = await callClaude(sys2, evalInput, 1024);
+      var evalInput = 'Вопрос учителя: ' + questionSpeech + '\nПравильный ответ: ' + correctAnswer + '\nПодсказка: ' + hintText + '\nПопытка номер: ' + attemptNumber + '\nОтвет ученика: ' + studentAnswer;
+
+      var evalText = await callClaude(sys, evalInput, 1024);
 
       try {
         var cleanedEval = evalText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         var parsed = JSON.parse(cleanedEval);
         return res.status(200).json(parsed);
       } catch (e) {
-        return res.status(200).json({ correct: false, reaction: evalText, board: [] });
+        return res.status(200).json({ status: 'explain', reaction: evalText });
       }
     }
 
     if (type === 'answer_with_board') {
-      var teacherSys = 'Ты Марина Сергеевна, репетитор. Ученик задал вопрос не по сегменту, а свой.\n\nСократический метод: наводящий вопрос, не готовый ответ. Если ученик не понимает — объясни коротко.\n\n- НЕ повторяй вопрос ученика\n- 2-3 предложения\n- В конце: "Ясно? Продолжим?"\n- Просто текст, без JSON\n\nКонтекст: ' + topic;
+      var teacherSys = 'Ты Марина Сергеевна, репетитор. Ученик задал свой вопрос.\n\nСократический метод: наводящий вопрос, не готовый ответ.\n- НЕ повторяй вопрос\n- 2-3 предложения\n- В конце: "Ясно? Продолжим?"\n- Просто текст\n\nКонтекст: ' + topic;
 
       var teacherAnswer = await callClaude(teacherSys, question, 1024);
 
-      var boardSys2 = 'Нужны ли формулы на доске к ответу? Если да — JSON массив, если нет — []. Максимум 1-3 элемента. Только JSON.';
+      var boardSys = 'Нужны ли формулы на доске к ответу? Если да — JSON массив, если нет — []. Макс 1-3 элемента. Только JSON.';
       var answerBoard = [];
       try {
-        var br = await callClaude(boardSys2, 'Вопрос: ' + question + '\nОтвет: ' + teacherAnswer, 512, 'claude-haiku-4-5-20251001');
+        var br = await callClaude(boardSys, 'Вопрос: ' + question + '\nОтвет: ' + teacherAnswer, 512, 'claude-haiku-4-5-20251001');
         var cb = br.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         answerBoard = JSON.parse(cb);
         if (!Array.isArray(answerBoard)) answerBoard = [];
@@ -107,3 +113,180 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 };
+```
+
+Commit, подожди деплой.
+
+---
+
+**Шаг 2 — Bolt.** Копируй:
+```
+В MathTutor.jsx нужно исправить два бага:
+1. Система иногда не ждёт ответ ученика и сама идёт дальше
+2. На "не знаю" нужно давать подсказки, а не сразу ответ
+
+Добавь стейт для подсчёта попыток после остальных стейтов:
+
+  const [attemptCount, setAttemptCount] = useState(0);
+
+В функции playSegment замени блок с segment.type === 'question'. Найди строку с if (segment.type === 'question') и замени весь блок onSpeechEnd для вопроса:
+
+    if (segment.type === 'question') {
+      onSpeechEnd = () => {
+        setAwaitingSegmentAnswer(true);
+        setCurrentQuestion(segment);
+        setAttemptCount(1);
+        setChatMessages((prev) => [...prev, {
+          role: 'teacher',
+          content: segment.speech
+        }]);
+      };
+    }
+
+Замени ПОЛНОСТЬЮ функцию sendStudentQuestion на эту:
+
+  const sendStudentQuestion = useCallback(
+    async (questionText) => {
+      var question = questionText?.trim() || studentMessage.trim();
+      if (!question) return;
+
+      setStudentMessage('');
+      stopAudio();
+
+      if (awaitingSegmentAnswer && currentQuestion) {
+        try {
+          var evalResponse = await fetch(PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'evaluate',
+              question: question,
+              topic: currentTopic,
+              questionSpeech: currentQuestion.speech,
+              correctAnswer: currentQuestion.answer || '',
+              hint: currentQuestion.hint || '',
+              attemptNumber: attemptCount,
+            }),
+          });
+
+          if (!evalResponse.ok) throw new Error('Evaluate error');
+
+          var evalData = await evalResponse.json();
+          var reaction = evalData.reaction || 'Давай продолжим.';
+          var status = evalData.status || 'explain';
+
+          setChatMessages((prev) => [...prev, { role: 'teacher', content: reaction }]);
+
+          if (status === 'correct') {
+            // Правильный ответ — озвучиваем реакцию и идём дальше
+            setAwaitingSegmentAnswer(false);
+            setCurrentQuestion(null);
+            setAttemptCount(0);
+
+            speakWithElevenLabs(reaction).then((audio) => {
+              currentAudioRef.current = audio;
+              audio.onplay = () => setIsSpeaking(true);
+              audio.onended = () => {
+                setIsSpeaking(false);
+                currentAudioRef.current = null;
+                setTimeout(() => {
+                  playSegment(currentSegmentIndex + 1);
+                }, 500);
+              };
+              audio.play();
+            }).catch((err) => {
+              console.error(err);
+              playSegment(currentSegmentIndex + 1);
+            });
+
+          } else if (status === 'hint') {
+            // Подсказка — озвучиваем и ждём новый ответ
+            setAttemptCount((prev) => prev + 1);
+
+            speakWithElevenLabs(reaction).then((audio) => {
+              currentAudioRef.current = audio;
+              audio.onplay = () => setIsSpeaking(true);
+              audio.onended = () => {
+                setIsSpeaking(false);
+                currentAudioRef.current = null;
+                // Продолжаем ждать ответ
+              };
+              audio.play();
+            }).catch((err) => console.error(err));
+
+          } else {
+            // explain — объяснили ответ, идём дальше
+            setAwaitingSegmentAnswer(false);
+            setCurrentQuestion(null);
+            setAttemptCount(0);
+
+            speakWithElevenLabs(reaction).then((audio) => {
+              currentAudioRef.current = audio;
+              audio.onplay = () => setIsSpeaking(true);
+              audio.onended = () => {
+                setIsSpeaking(false);
+                currentAudioRef.current = null;
+                setTimeout(() => {
+                  playSegment(currentSegmentIndex + 1);
+                }, 500);
+              };
+              audio.play();
+            }).catch((err) => {
+              console.error(err);
+              playSegment(currentSegmentIndex + 1);
+            });
+          }
+
+        } catch (error) {
+          console.error('Evaluate error:', error);
+          setAwaitingSegmentAnswer(false);
+          setCurrentQuestion(null);
+          playSegment(currentSegmentIndex + 1);
+        }
+        return;
+      }
+
+      // Обычный вопрос
+      try {
+        var context = 'Тема: ' + currentTopic;
+
+        var response = await fetch(PROXY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'answer_with_board',
+            question: question,
+            topic: context,
+          }),
+        });
+
+        if (!response.ok) throw new Error('API error');
+
+        var data = await response.json();
+        var answer = data.answer || 'Не могу ответить';
+
+        setChatMessages((prev) => [...prev, { role: 'teacher', content: answer }]);
+        playVoice(answer).catch((err) => console.error(err));
+
+        if (data.board && Array.isArray(data.board) && data.board.length > 0) {
+          setBoardContent((prev) => [
+            ...prev,
+            { type: 'text', content: '↳ К вопросу ученика:' },
+          ]);
+          data.board.forEach((item, i) => {
+            setTimeout(() => {
+              setBoardContent((prev) => [...prev, item]);
+            }, (i + 1) * 800);
+          });
+        }
+      } catch (error) {
+        console.error('Q&A error:', error);
+      }
+    },
+    [currentTopic, studentMessage, awaitingSegmentAnswer, currentQuestion, currentSegmentIndex, segments, attemptCount]
+  );
+
+В goBack добавь:
+  setAttemptCount(0);
+
+Больше ничего не меняй.
